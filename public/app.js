@@ -2,7 +2,6 @@ const API_URL = '/api/tasks';
 let tasks = [];
 let currentFilter = 'all';
 
-// DOM Elements
 const taskInput = document.getElementById('taskInput');
 const descriptionInput = document.getElementById('descriptionInput');
 const addBtn = document.getElementById('addBtn');
@@ -12,147 +11,144 @@ const totalCount = document.getElementById('totalCount');
 const completedCount = document.getElementById('completedCount');
 const filterBtns = document.querySelectorAll('.filter-btn');
 
-// Event Listeners
 addBtn.addEventListener('click', addTask);
-taskInput.addEventListener('keypress', (e) => e.key === 'Enter' && addTask());
-filterBtns.forEach(btn => {
-  btn.addEventListener('click', (e) => {
-    filterBtns.forEach(b => b.classList.remove('active'));
-    e.target.classList.add('active');
-    currentFilter = e.target.dataset.filter;
+taskInput.addEventListener('keypress', (event) => {
+  if (event.key === 'Enter') addTask();
+});
+descriptionInput.addEventListener('keypress', (event) => {
+  if (event.key === 'Enter') addTask();
+});
+
+filterBtns.forEach((button) => {
+  button.addEventListener('click', () => {
+    filterBtns.forEach((item) => item.classList.remove('active'));
+    button.classList.add('active');
+    currentFilter = button.dataset.filter;
     renderTasks();
   });
 });
 
-// Fetch all tasks
+async function request(url, options = {}) {
+  const response = await fetch(url, options);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || payload.message || 'Request failed');
+  }
+  return payload;
+}
+
 async function fetchTasks() {
   try {
-    const response = await fetch(API_URL);
-    tasks = await response.json();
+    const payload = await request(API_URL);
+    tasks = Array.isArray(payload) ? payload : (payload.data || []);
     renderTasks();
   } catch (error) {
     console.error('Error fetching tasks:', error);
+    showError(error.message);
   }
 }
 
-// Add new task
 async function addTask() {
   const title = taskInput.value.trim();
   const description = descriptionInput.value.trim();
 
   if (!title) {
     alert('Please enter a task title');
+    taskInput.focus();
     return;
   }
 
   try {
-    const response = await fetch(API_URL, {
+    addBtn.disabled = true;
+    await request(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, description }),
     });
-
-    if (response.ok) {
-      taskInput.value = '';
-      descriptionInput.value = '';
-      fetchTasks();
-    }
+    taskInput.value = '';
+    descriptionInput.value = '';
+    await fetchTasks();
   } catch (error) {
-    console.error('Error adding task:', error);
+    alert(error.message);
+  } finally {
+    addBtn.disabled = false;
   }
 }
 
-// Toggle task completion
 async function toggleTask(id) {
-  const task = tasks.find(t => t._id === id);
+  const task = tasks.find((item) => item._id === id);
   if (!task) return;
 
   try {
-    const response = await fetch(`${API_URL}/${id}`, {
+    await request(`${API_URL}/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...task, completed: !task.completed }),
+      body: JSON.stringify({ completed: !task.completed }),
     });
-
-    if (response.ok) {
-      fetchTasks();
-    }
+    await fetchTasks();
   } catch (error) {
-    console.error('Error updating task:', error);
+    alert(error.message);
+    await fetchTasks();
   }
 }
 
-// Delete task
 async function deleteTask(id) {
   if (!confirm('Are you sure you want to delete this task?')) return;
 
   try {
-    const response = await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
-
-    if (response.ok) {
-      fetchTasks();
-    }
+    await request(`${API_URL}/${id}`, { method: 'DELETE' });
+    await fetchTasks();
   } catch (error) {
-    console.error('Error deleting task:', error);
+    alert(error.message);
   }
 }
 
-// Render tasks
 function renderTasks() {
-  const filteredTasks = tasks.filter(task => {
+  const filteredTasks = tasks.filter((task) => {
     if (currentFilter === 'active') return !task.completed;
     if (currentFilter === 'completed') return task.completed;
     return true;
   });
 
   taskList.innerHTML = '';
+  emptyState.classList.toggle('show', filteredTasks.length === 0);
 
-  if (filteredTasks.length === 0) {
-    emptyState.classList.add('show');
-    return;
-  }
-
-  emptyState.classList.remove('show');
-
-  filteredTasks.forEach(task => {
+  filteredTasks.forEach((task) => {
     const li = document.createElement('li');
     li.className = `task-item ${task.completed ? 'completed' : ''}`;
     li.innerHTML = `
-      <input 
-        type="checkbox" 
-        class="task-checkbox" 
-        ${task.completed ? 'checked' : ''} 
-        onchange="toggleTask('${task._id}')"
-      >
+      <input type="checkbox" class="task-checkbox" ${task.completed ? 'checked' : ''} aria-label="Mark task complete">
       <div class="task-content">
         <div class="task-title">${escapeHtml(task.title)}</div>
         ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
-        <div class="task-meta">
-          Created: ${new Date(task.createdAt).toLocaleDateString()}
-        </div>
+        <div class="task-meta">Created: ${new Date(task.createdAt).toLocaleDateString()}</div>
       </div>
       <div class="task-actions">
-        <button class="btn-small btn-delete" onclick="deleteTask('${task._id}')">Delete</button>
+        <button class="btn-small btn-delete" type="button">Delete</button>
       </div>
     `;
+    li.querySelector('.task-checkbox').addEventListener('change', () => toggleTask(task._id));
+    li.querySelector('.btn-delete').addEventListener('click', () => deleteTask(task._id));
     taskList.appendChild(li);
   });
 
   updateStats();
 }
 
-// Update statistics
 function updateStats() {
   totalCount.textContent = tasks.length;
-  completedCount.textContent = tasks.filter(t => t.completed).length;
+  completedCount.textContent = tasks.filter((task) => task.completed).length;
 }
 
-// Escape HTML to prevent XSS
+function showError(message) {
+  emptyState.textContent = `Unable to load tasks: ${message}`;
+  emptyState.classList.add('show');
+}
+
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 }
 
-// Load tasks on page load
 fetchTasks();
